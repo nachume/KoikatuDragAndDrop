@@ -3,9 +3,13 @@ using BepInEx;
 using ChaCustom;
 using Illusion.Game;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using UnityEngine;
+using Studio;
+using System.Reflection;
 
 namespace DragAndDrop
 {
@@ -32,20 +36,73 @@ namespace DragAndDrop
             var path = aFiles[0];
             if (path == null) return;
 
-            if (Singleton<CustomBase>.IsInstance())
-            {
-                try
-                {
-                    LoadCharacter(path);
-                    Utils.Sound.Play(SystemSE.ok_s);
+            if (Singleton<Manager.Scene>.IsInstance()) {
+
+                try {
+
+                    if (Singleton<Manager.Scene>.Instance.NowSceneNames.Any(_ => _ == "CustomScene")) {
+
+                        if (Singleton<CustomBase>.IsInstance()) {
+                            LoadCharacter(path);
+                            Utils.Sound.Play(SystemSE.ok_s);
+                        }
+                    }
+                    else if (Singleton<Manager.Scene>.Instance.NowSceneNames.Any(_ => _ == "Studio")) {
+
+                        if (path.Contains(@"UserData\chara")) {
+                            AddChara(path);
+                        }
+                        else {
+                            LoadScene(path);
+                        }
+                        Utils.Sound.Play(SystemSE.ok_s);
+                    }
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) {
                     BepInLogger.Log("Character load failed", true);
                     BepInLogger.Log(ex.ToString());
                     Utils.Sound.Play(SystemSE.ok_l);
                 }
             }
+        }
+
+        private void AddChara(string path)
+        {
+            ChaFileControl charaCtrl = new ChaFileControl();
+
+            if (charaCtrl.LoadCharaFile(path, 1, true, true)) {
+                ObjectCtrlInfo ctrlInfo = Studio.Studio.GetCtrlInfo(Singleton<Studio.Studio>.Instance.treeNodeCtrl.selectNode);
+                OCIChar ocichar = ctrlInfo as OCIChar;
+
+                if (ocichar != null && charaCtrl.parameter.sex == ocichar.sex) {
+                    OCIChar[] array = (from v in Singleton<GuideObjectManager>.Instance.selectObjectKey
+                                       select Studio.Studio.GetCtrlInfo(v) as OCIChar into v
+                                       where v != null
+                                       where v.oiCharInfo.sex == charaCtrl.parameter.sex
+                                       select v).ToArray<OCIChar>();
+
+                    for (int i = 0, num = array.Length; i < num; i++) {
+                        array[i].ChangeChara(path);
+                    }
+                } else {
+
+                    if (charaCtrl.parameter.sex == 0) {
+                        Singleton<Studio.Studio>.Instance.AddMale(path);
+                    }
+                    else if (charaCtrl.parameter.sex == 1) {
+                        Singleton<Studio.Studio>.Instance.AddFemale(path);
+                    }
+                }
+            }
+        }
+
+        private void LoadScene(string path)
+        {
+            if (path == null)
+                throw new ArgumentNullException(nameof(path));
+
+            StartCoroutine(Singleton<Studio.Studio>.Instance.LoadSceneCoroutine(path));
+
         }
 
         private void LoadCharacter(string path)
