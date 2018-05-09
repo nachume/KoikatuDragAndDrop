@@ -10,16 +10,32 @@ using System.Linq;
 using UnityEngine;
 using Studio;
 using System.Reflection;
+//using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
+using System.Text;
 
 namespace DragAndDrop
 {
-    [BepInPlugin(GUID: "com.immi.koikatu.draganddrop", Name: "Drag and Drop", Version: "1.1")]
+    public class DragAndDropException : Exception
+    {
+        public DragAndDropException() { }
+        public DragAndDropException(string message) : base(message) { }
+        public DragAndDropException(string message, Exception inner) : base(message, inner) { }
+    }
+
+    [BepInPlugin(GUID: "com.immi.koikatu.draganddrop", Name: "Drag and Drop", Version: "1.1.3")]
     class DragAndDrop : BaseUnityPlugin
     {
         private UnityDragAndDropHook hook;
 
+        private const string charaToken = "【KoiKatuChara】";
+        private const string studioToken = "【KStudio】";
+        private enum PngType { Unknown = 0, KoikatuChara, KStudio }
+
         private void OnEnable()
         {
+
             hook = new UnityDragAndDropHook();
             hook.InstallHook();
             hook.OnDroppedFiles += OnDroppedFiles;
@@ -30,32 +46,45 @@ namespace DragAndDrop
             hook.UninstallHook();
         }
 
+ 
+
         private void OnDroppedFiles(List<string> aFiles, POINT aPos)
         {
             if (aFiles.Count == 0) return;
             var path = aFiles[0];
             if (path == null) return;
 
+            if (Path.GetExtension(path).ToLower() != ".png") {
+                return;
+            }
+
             if (Singleton<Manager.Scene>.IsInstance()) {
 
                 try {
 
+                    PngType ptype = CheckPngType(path);
+
                     if (Singleton<Manager.Scene>.Instance.NowSceneNames.Any(_ => _ == "CustomScene")) {
 
-                        if (Singleton<CustomBase>.IsInstance()) {
+                        if (Singleton<CustomBase>.IsInstance() && ptype == PngType.KoikatuChara) {
                             LoadCharacter(path);
                             Utils.Sound.Play(SystemSE.ok_s);
                         }
                     }
                     else if (Singleton<Manager.Scene>.Instance.NowSceneNames.Any(_ => _ == "Studio")) {
 
-                        if (path.Contains(@"UserData\chara")) {
+                        if (ptype == PngType.KoikatuChara) {
                             AddChara(path);
+                            Utils.Sound.Play(SystemSE.ok_s);
                         }
-                        else {
+                        else if (ptype == PngType.KStudio) {
                             LoadScene(path);
+                            Utils.Sound.Play(SystemSE.ok_s);
                         }
-                        Utils.Sound.Play(SystemSE.ok_s);
+                    }
+
+                    if (ptype == PngType.Unknown) {
+                        Utils.Sound.Play(SystemSE.ok_l);
                     }
                 }
                 catch (Exception ex) {
@@ -66,10 +95,41 @@ namespace DragAndDrop
             }
         }
 
+        private PngType CheckPngType(string path)
+        {
+
+            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var br = new BinaryReader(fs)) {
+                try {
+                    PngFile.SkipPng(br);
+                    br.ReadInt32(); // data Version
+                } catch (EndOfStreamException) {
+                    return PngType.Unknown;
+                }
+                try {
+                    if (br.ReadString() == charaToken) {
+                        return PngType.KoikatuChara;
+                    }
+                }
+                catch (EndOfStreamException) { } // unknown or scene
+
+                int len = Encoding.UTF8.GetByteCount(studioToken);
+                br.BaseStream.Seek(-len, SeekOrigin.End);
+                try {
+                    
+                    if (Encoding.UTF8.GetString(br.ReadBytes(len)) == studioToken) {
+                        return PngType.KStudio;
+                    }
+                }
+                catch (EndOfStreamException) { } // detected unknown
+            }
+            return PngType.Unknown;
+        }
+
+
         private void AddChara(string path)
         {
             ChaFileControl charaCtrl = new ChaFileControl();
-
             if (charaCtrl.LoadCharaFile(path, 1, true, true)) {
                 ObjectCtrlInfo ctrlInfo = Studio.Studio.GetCtrlInfo(Singleton<Studio.Studio>.Instance.treeNodeCtrl.selectNode);
                 OCIChar ocichar = ctrlInfo as OCIChar;
@@ -108,6 +168,7 @@ namespace DragAndDrop
         private void LoadCharacter(string path)
         {
             if (path == null) throw new ArgumentNullException(nameof(path));
+
 
             LoadFlags lf = GetLoadFlags();
 

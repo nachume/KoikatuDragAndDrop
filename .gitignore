@@ -2,3 +2,5 @@
 [Bb]in/
 [Oo]bj/
 lib/
+Interfaces/
+OLE.cs
